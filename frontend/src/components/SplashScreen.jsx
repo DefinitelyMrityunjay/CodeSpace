@@ -1,45 +1,52 @@
 import { useState, useEffect } from 'react'
 
+const Spinner = () => (
+  <div className="animate-spin" style={{ width: '16px', height: '16px', border: '1.5px solid #D4D4D8', borderTopColor: '#0A0A0A', borderRadius: '50%' }} />
+)
+
 export default function SplashScreen({ onSandboxCreated }) {
-  const [ loading, setLoading ] = useState(false)
-  const [ loadingProjectId, setLoadingProjectId ] = useState(null) // id being opened
-  const [ error, setError ] = useState(null)
-  const [ dots, setDots ] = useState('')
-  const [ title, setTitle ] = useState('')
-  const [ loadingStep, setLoadingStep ] = useState('') // 'project' | 'sandbox'
+  const [loading, setLoading] = useState(false)
+  const [loadingProjectId, setLoadingProjectId] = useState(null)
+  const [error, setError] = useState(null)
+  const [dots, setDots] = useState('')
+  const [title, setTitle] = useState('')
+  const [loadingStep, setLoadingStep] = useState('')
 
-  // Existing projects
-  const [ projects, setProjects ] = useState([])
-  const [ projectsLoading, setProjectsLoading ] = useState(true)
+  const [user, setUser] = useState(null)      // null = checking, false = not logged in, obj = logged in
+  const [projects, setProjects] = useState([])
+  const [projectsLoading, setProjectsLoading] = useState(true)
 
-  // Fetch existing projects on mount
+  // Check auth state then load projects
   useEffect(() => {
-    const fetchProjects = async () => {
+    const init = async () => {
       try {
-        const res = await fetch('/api/sandbox/project', { credentials: 'include' })
-        if (res.ok) {
-          const data = await res.json()
+        const meRes = await fetch('/api/auth/me', { credentials: 'include' })
+        if (!meRes.ok) { setUser(false); setProjectsLoading(false); return }
+        const me = await meRes.json()
+        setUser(me)
+
+        const projRes = await fetch('/api/sandbox/project', { credentials: 'include' })
+        if (projRes.ok) {
+          const data = await projRes.json()
           setProjects(data.projects || [])
         }
       } catch {
-        // Silently ignore — user may not be logged in yet
+        setUser(false)
       } finally {
         setProjectsLoading(false)
       }
     }
-    fetchProjects()
+    init()
   }, [])
 
-  // Animated dots while loading
   useEffect(() => {
     if (!loading) return
     const interval = setInterval(() => {
       setDots(d => d.length >= 3 ? '' : d + '.')
     }, 400)
     return () => clearInterval(interval)
-  }, [ loading ])
+  }, [loading])
 
-  // Start sandbox for an existing project
   const handleOpenProject = async (projectId) => {
     setLoadingProjectId(projectId)
     setError(null)
@@ -59,17 +66,12 @@ export default function SplashScreen({ onSandboxCreated }) {
     }
   }
 
-  // Create new project then start its sandbox
   const handleCreate = async () => {
     const projectTitle = title.trim()
-    if (!projectTitle) {
-      setError('Please enter a project name')
-      return
-    }
+    if (!projectTitle) { setError('Please enter a project name'); return }
     setLoading(true)
     setError(null)
     try {
-      // Step 1: Create the project
       setLoadingStep('project')
       const projectRes = await fetch('/api/sandbox/project', {
         method: 'POST',
@@ -81,7 +83,6 @@ export default function SplashScreen({ onSandboxCreated }) {
       const projectData = await projectRes.json()
       const projectId = projectData.project._id
 
-      // Step 2: Start the sandbox
       setLoadingStep('sandbox')
       const sandboxRes = await fetch('/api/sandbox/start', {
         method: 'POST',
@@ -102,251 +103,196 @@ export default function SplashScreen({ onSandboxCreated }) {
   const isAnyLoading = loading || loadingProjectId !== null
 
   return (
-    <div className="relative flex flex-col items-center justify-center h-full w-full overflow-hidden">
-      {/* Background grid */}
-      <div className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(34,211,238,0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(34,211,238,0.03) 1px, transparent 1px)
-          `,
-          backgroundSize: '40px 40px'
-        }}
-      />
+    <div style={{
+      height: '100%', width: '100%', background: '#FAFAFA',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      overflow: 'auto', padding: '64px 24px', position: 'relative'
+    }}>
 
-      {/* Radial glow */}
-      <div className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 60% 50% at 50% 50%, rgba(34,211,238,0.06) 0%, transparent 70%)'
-        }}
-      />
+      <div style={{ width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '40px' }}>
 
-      {/* Floating particles */}
-      {[ ...Array(12) ].map((_, i) => (
-        <div key={i}
-          className="absolute rounded-full opacity-20"
-          style={{
-            width: Math.random() * 4 + 2 + 'px',
-            height: Math.random() * 4 + 2 + 'px',
-            background: '#22d3ee',
-            left: Math.random() * 100 + '%',
-            top: Math.random() * 100 + '%',
-            animation: `pulse-glow ${2 + Math.random() * 3}s ease-in-out infinite`,
-            animationDelay: Math.random() * 2 + 's'
-          }}
-        />
-      ))}
-
-      {/* Main content */}
-      <div className="relative z-10 flex flex-col items-center gap-8 px-6 text-center animate-fadeIn w-full" style={{ maxWidth: '480px' }}>
-        {/* Logo / Icon */}
-        <div className="relative">
-          <div className="w-20 h-20 rounded-2xl flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg, rgba(34,211,238,0.15), rgba(8,145,178,0.08))',
-              border: '1px solid rgba(34,211,238,0.3)',
-              boxShadow: '0 0 40px rgba(34,211,238,0.2), inset 0 1px 0 rgba(255,255,255,0.05)'
-            }}>
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-              <rect x="4" y="4" width="14" height="14" rx="2" fill="#22d3ee" opacity="0.9" />
-              <rect x="22" y="4" width="14" height="14" rx="2" fill="#22d3ee" opacity="0.4" />
-              <rect x="4" y="22" width="14" height="14" rx="2" fill="#22d3ee" opacity="0.4" />
-              <rect x="22" y="22" width="14" height="14" rx="2" fill="#22d3ee" opacity="0.9" />
-            </svg>
-          </div>
-          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-            style={{ background: '#10b981', boxShadow: '0 0 10px rgba(16,185,129,0.5)' }}>
-            <div className="w-2 h-2 rounded-full bg-white" />
-          </div>
-        </div>
+        {/* Logo mark */}
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="0" y="0" width="12" height="12" fill="#0A0A0A" />
+          <rect x="16" y="0" width="12" height="12" fill="#0A0A0A" opacity="0.2" />
+          <rect x="0" y="16" width="12" height="12" fill="#0A0A0A" opacity="0.2" />
+          <rect x="16" y="16" width="12" height="12" fill="#0A0A0A" />
+        </svg>
 
         {/* Title */}
-        <div>
-          <h1 className="text-5xl font-bold tracking-tight mb-3"
-            style={{
-              background: 'linear-gradient(135deg, #e2e8f0 0%, #94a3b8 50%, #22d3ee 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
-            }}>
+        <div style={{ textAlign: 'center' }}>
+          <h1 style={{ fontSize: '40px', fontWeight: '700', lineHeight: '1.1', color: '#0A0A0A', letterSpacing: '-0.02em' }}>
             Sandbox IDE
           </h1>
-          <p className="text-lg" style={{ color: '#64748b' }}>
+          <p style={{ fontSize: '16px', fontWeight: '300', lineHeight: '1.65', color: '#71717A', marginTop: '12px' }}>
             Spin up an isolated coding environment in seconds
           </p>
         </div>
 
-        {/* Feature pills */}
-        <div className="flex flex-wrap justify-center gap-2">
-          {[ 'AI-Powered', 'Live Preview', 'Terminal Access', 'File Explorer' ].map(f => (
-            <span key={f} className="px-3 py-1 text-xs font-medium rounded-full"
-              style={{
-                background: 'rgba(34,211,238,0.08)',
-                border: '1px solid rgba(34,211,238,0.2)',
-                color: '#94a3b8'
-              }}>
+        {/* Feature chips */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '8px' }}>
+          {['AI-Powered', 'Live Preview', 'Terminal Access', 'File Explorer'].map(f => (
+            <span key={f} style={{
+              display: 'inline-flex', alignItems: 'center', height: '28px',
+              padding: '0 12px', border: '1px solid #D4D4D8',
+              fontSize: '11px', fontWeight: '400', color: '#71717A',
+              textTransform: 'uppercase', letterSpacing: '0.06em'
+            }}>
               {f}
             </span>
           ))}
         </div>
 
-        {/* Existing projects list */}
-        {!isAnyLoading && (
-          <>
-            {projectsLoading ? (
-              <div className="w-full flex justify-center py-2">
-                <div className="w-4 h-4 rounded-full border-2 border-t-transparent"
-                  style={{ borderColor: 'rgba(34,211,238,0.4)', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
-              </div>
-            ) : projects.length > 0 && (
-              <div className="w-full" style={{ maxWidth: '420px' }}>
-                <p className="text-xs font-medium uppercase tracking-widest mb-3 text-left" style={{ color: '#475569' }}>
-                  Recent Projects
-                </p>
-                <div className="flex flex-col gap-2">
-                  {projects.map(project => (
-                    <button
-                      key={project._id}
-                      onClick={() => handleOpenProject(project._id)}
-                      disabled={isAnyLoading}
-                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all duration-200 cursor-pointer group"
-                      style={{
-                        background: 'rgba(255,255,255,0.03)',
-                        border: '1px solid #1e2d45',
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.background = 'rgba(34,211,238,0.05)'
-                        e.currentTarget.style.borderColor = 'rgba(34,211,238,0.25)'
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
-                        e.currentTarget.style.borderColor = '#1e2d45'
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
-                          style={{ background: 'rgba(34,211,238,0.08)', border: '1px solid rgba(34,211,238,0.15)' }}>
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2">
-                            <rect x="3" y="3" width="7" height="7" rx="1"/>
-                            <rect x="14" y="3" width="7" height="7" rx="1"/>
-                            <rect x="3" y="14" width="7" height="7" rx="1"/>
-                            <rect x="14" y="14" width="7" height="7" rx="1"/>
-                          </svg>
-                        </div>
-                        <span className="text-sm font-medium" style={{ color: '#cbd5e1' }}>{project.title}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {loadingProjectId === project._id ? (
-                          <div className="w-4 h-4 rounded-full border-2 border-t-transparent"
-                            style={{ borderColor: '#22d3ee', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
-                        ) : (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2"
-                            style={{ transition: 'stroke 0.2s' }}
-                            className="group-hover:stroke-cyan-400">
-                            <polygon points="5 3 19 12 5 21 5 3"/>
-                          </svg>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Divider */}
-                <div className="flex items-center gap-3 my-5">
-                  <div className="flex-1 h-px" style={{ background: '#1e2d45' }} />
-                  <span className="text-xs" style={{ color: '#334155' }}>or create new</span>
-                  <div className="flex-1 h-px" style={{ background: '#1e2d45' }} />
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* New project input + CTA */}
-        {!isAnyLoading ? (
-          <div className="flex flex-col items-center gap-4 w-full" style={{ maxWidth: '420px' }}>
-            <div className="w-full rounded-xl overflow-hidden"
+        {/* Auth state */}
+        {user === null ? (
+          /* Checking auth */
+          <Spinner />
+        ) : user === false ? (
+          /* Not logged in — Google login */
+          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+            <p style={{ fontSize: '14px', fontWeight: '300', color: '#71717A' }}>
+              Sign in to create or open a sandbox
+            </p>
+            <a
+              href="/api/auth/google"
               style={{
-                background: 'rgba(255,255,255,0.03)',
-                border: '1px solid rgba(34,211,238,0.2)',
-                transition: 'border-color 0.2s'
+                width: '100%', height: '48px', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', gap: '12px',
+                background: '#FFFFFF', color: '#0A0A0A',
+                border: '1px solid #D4D4D8', textDecoration: 'none',
+                fontSize: '15px', fontWeight: '500', fontFamily: 'inherit',
+                transition: 'border-color 0.15s, background 0.15s'
               }}
-              onFocusCapture={e => e.currentTarget.style.borderColor = 'rgba(34,211,238,0.5)'}
-              onBlurCapture={e => e.currentTarget.style.borderColor = 'rgba(34,211,238,0.2)'}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#0A0A0A'; e.currentTarget.style.background = '#F4F4F5' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#D4D4D8'; e.currentTarget.style.background = '#FFFFFF' }}
             >
-              <input
-                type="text"
-                value={title}
-                onChange={e => { setTitle(e.target.value); setError(null) }}
-                onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                placeholder="New project name…"
-                className="w-full outline-none bg-transparent px-5 py-3.5 text-sm"
-                style={{ color: '#e2e8f0', caretColor: '#22d3ee' }}
-                autoFocus={projects.length === 0}
-              />
-            </div>
-            <button onClick={handleCreate}
-              className="group relative w-full py-4 rounded-xl text-base font-semibold transition-all duration-300 cursor-pointer"
-              style={{
-                background: 'linear-gradient(135deg, #22d3ee, #0891b2)',
-                color: '#070b14',
-                boxShadow: '0 0 30px rgba(34,211,238,0.3), 0 4px 20px rgba(0,0,0,0.3)'
-              }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow = '0 0 50px rgba(34,211,238,0.5), 0 4px 30px rgba(0,0,0,0.4)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 30px rgba(34,211,238,0.3), 0 4px 20px rgba(0,0,0,0.3)'}
-            >
-              <span className="flex items-center justify-center gap-2">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Create New Project
-              </span>
-            </button>
+              {/* Google logo */}
+              <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              </svg>
+              Continue with Google
+            </a>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-4">
-            <div className="flex items-center gap-3 px-8 py-4 rounded-xl"
-              style={{
-                background: 'rgba(34,211,238,0.06)',
-                border: '1px solid rgba(34,211,238,0.2)'
-              }}>
-              <div className="w-5 h-5 rounded-full border-2 border-t-transparent animate-spin"
-                style={{ borderColor: '#22d3ee', borderTopColor: 'transparent' }} />
-              <span className="text-sm font-medium" style={{ color: '#94a3b8' }}>
-                {loadingProjectId
-                  ? `Starting sandbox${dots}`
-                  : loadingStep === 'project'
-                    ? `Creating project${dots}`
-                    : `Starting sandbox${dots}`}
-              </span>
-            </div>
-            <p className="text-xs" style={{ color: '#475569' }}>
-              {loadingProjectId
-                ? 'Spinning up your isolated environment…'
-                : loadingStep === 'project'
-                  ? 'Registering your project…'
-                  : 'Spinning up your isolated environment…'}
-            </p>
+          /* Logged in — projects + create form */
+          <div style={{ width: '100%' }}>
+
+            {!isAnyLoading && (
+              <>
+                {projectsLoading ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0' }}>
+                    <Spinner />
+                  </div>
+                ) : projects.length > 0 && (
+                  <div style={{ marginBottom: '0' }}>
+                    <p style={{ fontSize: '11px', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#71717A', marginBottom: '12px' }}>
+                      Recent Projects
+                    </p>
+                    <div style={{ border: '1px solid #D4D4D8' }}>
+                      {projects.map((project, i) => (
+                        <button
+                          key={project._id}
+                          onClick={() => handleOpenProject(project._id)}
+                          disabled={isAnyLoading}
+                          style={{
+                            width: '100%', display: 'flex', alignItems: 'center',
+                            justifyContent: 'space-between', padding: '12px 16px',
+                            background: 'transparent', border: 'none',
+                            borderTop: i > 0 ? '1px solid #D4D4D8' : 'none',
+                            cursor: 'pointer', textAlign: 'left',
+                            transition: 'background 0.15s'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#F4F4F5'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <span style={{ fontSize: '14px', fontWeight: '400', color: '#0A0A0A' }}>
+                            {project.title}
+                          </span>
+                          {loadingProjectId === project._id ? (
+                            <div className="animate-spin" style={{ width: '14px', height: '14px', border: '1.5px solid #D4D4D8', borderTopColor: '#0A0A0A', borderRadius: '50%', flexShrink: 0 }} />
+                          ) : (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A1A1AA" strokeWidth="2">
+                              <polyline points="9 18 15 12 9 6" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px', margin: '32px 0' }}>
+                      <div style={{ flex: 1, height: '1px', background: '#D4D4D8' }} />
+                      <span style={{ fontSize: '12px', fontWeight: '400', color: '#A1A1AA' }}>or create new</span>
+                      <div style={{ flex: 1, height: '1px', background: '#D4D4D8' }} />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {!isAnyLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => { setTitle(e.target.value); setError(null) }}
+                  onKeyDown={e => e.key === 'Enter' && handleCreate()}
+                  placeholder="New project name…"
+                  autoFocus={projects.length === 0}
+                  style={{
+                    width: '100%', height: '40px', padding: '0 16px',
+                    border: '1px solid #D4D4D8', borderRadius: '0',
+                    fontSize: '14px', fontWeight: '400', color: '#0A0A0A',
+                    background: '#FFFFFF', outline: 'none', fontFamily: 'inherit',
+                    transition: 'border-color 0.15s'
+                  }}
+                  onFocus={e => e.target.style.border = '2px solid #0A0A0A'}
+                  onBlur={e => e.target.style.border = '1px solid #D4D4D8'}
+                />
+                <button
+                  onClick={handleCreate}
+                  style={{
+                    width: '100%', height: '48px',
+                    background: '#0A0A0A', color: '#FAFAFA',
+                    border: '1px solid #0A0A0A',
+                    fontSize: '15px', fontWeight: '500',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                    transition: 'background 0.15s, color 0.15s',
+                    letterSpacing: '0.01em'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = '#FAFAFA'; e.currentTarget.style.color = '#0A0A0A' }}
+                  onMouseLeave={e => { e.currentTarget.style.background = '#0A0A0A'; e.currentTarget.style.color = '#FAFAFA' }}
+                >
+                  Create New Project
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                <Spinner />
+                <p style={{ fontSize: '14px', fontWeight: '300', color: '#71717A' }}>
+                  {loadingProjectId
+                    ? `Starting sandbox${dots}`
+                    : loadingStep === 'project'
+                      ? `Creating project${dots}`
+                      : `Starting sandbox${dots}`}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
         {error && (
-          <div className="px-5 py-3 rounded-lg text-sm"
-            style={{
-              background: 'rgba(239,68,68,0.1)',
-              border: '1px solid rgba(239,68,68,0.3)',
-              color: '#fca5a5'
-            }}>
-            ⚠ {error}
-          </div>
+          <p style={{ fontSize: '13px', color: '#DC2626', fontWeight: '400' }}>
+            {error}
+          </p>
         )}
       </div>
 
-      {/* Bottom brand */}
-      <div className="absolute bottom-6 text-xs" style={{ color: '#334155' }}>
-        Powered by AI • Isolated Runtime • Zero Config
-      </div>
+      <p style={{ position: 'absolute', bottom: '24px', fontSize: '12px', fontWeight: '400', color: '#A1A1AA' }}>
+        Powered by AI · Isolated Runtime · Zero Config
+      </p>
     </div>
   )
 }

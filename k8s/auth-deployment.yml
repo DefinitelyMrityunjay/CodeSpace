@@ -68,6 +68,9 @@ spec:
             secretKeyRef:
               name: jwt
               key: JWT_SECRET
+
+        - name: GOOGLE_CALLBACK_URL
+          value: "http://localhost:18080/api/auth/google/callback"
         ports:
         - containerPort:  3000
           name: auth-http

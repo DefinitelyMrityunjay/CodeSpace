@@ -38,8 +38,8 @@ export async function createPod(sandboxId, projectId) {
                     name: 'sandbox-container',
                     ports: [ { containerPort: 5173, name: "http" } ],
                     resources: {
-                        limits: { cpu: "500m", memory: "1Gi" },
-                        requests: { cpu: "250m", memory: "500Mi" }
+                        limits: { cpu: "500m", memory: "512Mi" },
+                        requests: { cpu: "100m", memory: "200Mi" }
                     },
                     volumeMounts: [
                         {
@@ -54,8 +54,8 @@ export async function createPod(sandboxId, projectId) {
                     name: 'agent-container',
                     ports: [ { containerPort: 3000, name: "http" } ],
                     resources: {
-                        limits: { cpu: "500m", memory: "1Gi" },
-                        requests: { cpu: "250m", memory: "500Mi" }
+                        limits: { cpu: "500m", memory: "512Mi" },
+                        requests: { cpu: "100m", memory: "200Mi" }
                     },
                     volumeMounts: [
                         {

@@ -7,10 +7,9 @@ export default defineConfig({
   plugins: [ react(), tailwindcss() ],
   server: {
     host: "0.0.0.0",
-    port: 5173,
+    port: 5174,
     hmr: {
-      // Stabilise HMR — prevents reloads triggered by unrelated socket errors.
-      clientPort: 5173,
+      clientPort: 5174,
     },
     proxy: {
       // REST API — forwarded to the backend/ingress

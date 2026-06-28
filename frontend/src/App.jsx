@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import SplashScreen from './components/SplashScreen'
 import TopBar from './components/TopBar'
 import FileExplorer from './components/FileExplorer'
@@ -7,28 +7,56 @@ import FileViewer from './components/FileViewer'
 import Terminal from './components/Terminal'
 import AiChat from './components/AiChat'
 
+const SESSION_KEY = 'codespace_sandbox_id'
+
+function buildSandboxUrls(sandboxId) {
+  const port = import.meta.env.VITE_SUBDOMAIN_PORT
+  const p = port ? `:${port}` : ''
+  return {
+    sandboxId,
+    agentBase: `http://${sandboxId}.agent.lvh.me${p}`,
+    previewUrl: `http://${sandboxId}.preview.lvh.me${p}`,
+  }
+}
+
 export default function App() {
-  // Sandbox state
-  const [sandbox, setSandbox] = useState(null) // { sandboxId, previewUrl, agentBase }
+  const [sandbox, setSandbox] = useState(null)
   const [status, setStatus] = useState('ready')
 
-  // UI state
-  const [activeTab, setActiveTab] = useState('preview') // 'preview' | 'files'
+  const [activeTab, setActiveTab] = useState('preview')
   const [activeFile, setActiveFile] = useState(null)
   const [fileRefreshKey, setFileRefreshKey] = useState(0)
 
-  // Terminal resize
   const [terminalHeight, setTerminalHeight] = useState(220)
   const isDragging = useRef(false)
   const dragStartY = useRef(0)
   const dragStartH = useRef(0)
 
+  // Restore sandbox from sessionStorage if the agent is still alive
+  useEffect(() => {
+    const saved = sessionStorage.getItem(SESSION_KEY)
+    if (!saved) return
+    const { agentBase } = buildSandboxUrls(saved)
+    fetch(`${agentBase}/list-files`, { signal: AbortSignal.timeout(4000) })
+      .then(r => { if (r.ok) setSandbox(buildSandboxUrls(saved)) })
+      .catch(() => sessionStorage.removeItem(SESSION_KEY))
+  }, [])
+
+  // Stop sandbox on page unload (best-effort)
+  useEffect(() => {
+    const handleUnload = () => {
+      const saved = sessionStorage.getItem(SESSION_KEY)
+      if (!saved) return
+      const blob = new Blob([JSON.stringify({ sandboxId: saved })], { type: 'application/json' })
+      navigator.sendBeacon('/api/sandbox/stop', blob)
+    }
+    window.addEventListener('beforeunload', handleUnload)
+    return () => window.removeEventListener('beforeunload', handleUnload)
+  }, [])
+
   const handleSandboxCreated = useCallback((data) => {
-    const port = import.meta.env.VITE_SUBDOMAIN_PORT
-    const p = port ? `:${port}` : ''
-    const agentBase = `http://${data.sandboxId}.agent.lvh.me${p}`
-    const previewUrl = `http://${data.sandboxId}.preview.lvh.me${p}`
-    setSandbox({ sandboxId: data.sandboxId, previewUrl, agentBase })
+    sessionStorage.setItem(SESSION_KEY, data.sandboxId)
+    setSandbox(buildSandboxUrls(data.sandboxId))
     setStatus('ready')
   }, [])
 
@@ -41,7 +69,6 @@ export default function App() {
     setActiveTab('files')
   }, [])
 
-  // Drag to resize terminal
   const handleDragStart = (e) => {
     isDragging.current = true
     dragStartY.current = e.clientY
@@ -62,7 +89,6 @@ export default function App() {
     document.addEventListener('mouseup', onUp)
   }
 
-  // Landing / splash
   if (!sandbox) {
     return <SplashScreen onSandboxCreated={handleSandboxCreated} />
   }
@@ -70,10 +96,8 @@ export default function App() {
   const { sandboxId, previewUrl, agentBase } = sandbox
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden"
-      style={{ background: '#070b14' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', overflow: 'hidden', background: '#FAFAFA' }}>
 
-      {/* Top bar */}
       <TopBar
         sandboxId={sandboxId}
         activeTab={activeTab}
@@ -81,10 +105,8 @@ export default function App() {
         status={status}
       />
 
-      {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-        {/* File Explorer sidebar */}
         <FileExplorer
           agentBase={agentBase}
           activeFile={activeFile}
@@ -92,11 +114,9 @@ export default function App() {
           refreshKey={fileRefreshKey}
         />
 
-        {/* Center — main content + terminal */}
-        <div className="flex flex-col flex-1 overflow-hidden">
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
 
-          {/* Main content area */}
-          <div className="flex-1 overflow-hidden">
+          <div style={{ flex: 1, overflow: 'hidden' }}>
             {activeTab === 'preview' ? (
               <PreviewFrame previewUrl={previewUrl} />
             ) : (
@@ -106,21 +126,19 @@ export default function App() {
 
           {/* Drag handle */}
           <div
-            className="shrink-0 flex items-center justify-center cursor-row-resize select-none"
-            style={{ height: '6px', background: '#0d1424', borderTop: '1px solid #1e2d45', borderBottom: '1px solid #1e2d45', zIndex: 10 }}
+            style={{ height: '5px', background: '#F4F4F5', borderTop: '1px solid #D4D4D8', borderBottom: '1px solid #D4D4D8', cursor: 'row-resize', flexShrink: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             onMouseDown={handleDragStart}
-            title="Drag to resize terminal">
-            <div className="w-12 h-0.5 rounded-full" style={{ background: '#2a3f60' }} />
+            title="Drag to resize terminal"
+          >
+            <div style={{ width: '32px', height: '1px', background: '#D4D4D8' }} />
           </div>
 
-          {/* Terminal */}
-          <div className="shrink-0 overflow-hidden" style={{ height: `${terminalHeight}px` }}>
+          <div style={{ height: `${terminalHeight}px`, flexShrink: 0, overflow: 'hidden' }}>
             <Terminal sandboxId={sandboxId} />
           </div>
         </div>
 
-        {/* Right — AI Chat */}
-        <div className="shrink-0 overflow-hidden" style={{ width: '340px' }}>
+        <div style={{ width: '340px', flexShrink: 0, overflow: 'hidden' }}>
           <AiChat
             sandboxId={sandboxId}
             onFilesChanged={handleFilesChanged}

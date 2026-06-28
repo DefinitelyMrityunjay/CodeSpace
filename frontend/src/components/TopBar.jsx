@@ -2,41 +2,36 @@ export default function TopBar({ sandboxId, activeTab, onTabChange, status }) {
   const shortId = sandboxId ? sandboxId.slice(0, 8) + '…' : ''
 
   const statusConfig = {
-    ready: { color: '#10b981', label: 'Ready', dot: true },
-    loading: { color: '#f59e0b', label: 'Working…', dot: false },
-    error: { color: '#ef4444', label: 'Error', dot: true },
+    ready: { color: '#16A34A', label: 'Ready' },
+    loading: { color: '#CA8A04', label: 'Working…' },
+    error: { color: '#DC2626', label: 'Error' },
   }
   const s = statusConfig[status] || statusConfig.ready
 
   return (
-    <header className="flex items-center justify-between px-4 shrink-0"
-      style={{
-        height: '48px',
-        background: 'rgba(13,20,36,0.95)',
-        borderBottom: '1px solid #1e2d45',
-        backdropFilter: 'blur(12px)'
-      }}>
+    <header style={{
+      height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 16px', background: '#FFFFFF', borderBottom: '1px solid #D4D4D8',
+      flexShrink: 0
+    }}>
 
       {/* Left — Logo + sandbox ID */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg, rgba(34,211,238,0.2), rgba(8,145,178,0.1))', border: '1px solid rgba(34,211,238,0.3)' }}>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="#22d3ee">
-              <rect x="1" y="1" width="6" height="6" rx="1"/>
-              <rect x="9" y="1" width="6" height="6" rx="1" opacity="0.5"/>
-              <rect x="1" y="9" width="6" height="6" rx="1" opacity="0.5"/>
-              <rect x="9" y="9" width="6" height="6" rx="1"/>
-            </svg>
-          </div>
-          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>Sandbox IDE</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="0" y="0" width="6" height="6" fill="#0A0A0A" />
+            <rect x="10" y="0" width="6" height="6" fill="#0A0A0A" opacity="0.25" />
+            <rect x="0" y="10" width="6" height="6" fill="#0A0A0A" opacity="0.25" />
+            <rect x="10" y="10" width="6" height="6" fill="#0A0A0A" />
+          </svg>
+          <span style={{ fontSize: '14px', fontWeight: '600', color: '#0A0A0A', letterSpacing: '-0.01em' }}>
+            Sandbox IDE
+          </span>
         </div>
-
         {sandboxId && (
-          <div className="flex items-center gap-2 px-2 py-0.5 rounded"
-            style={{ background: 'rgba(34,211,238,0.06)', border: '1px solid rgba(34,211,238,0.15)' }}>
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: s.color, boxShadow: `0 0 6px ${s.color}` }} />
-            <span className="text-xs font-mono" style={{ color: '#64748b' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '2px 8px', background: '#F4F4F5', border: '1px solid #D4D4D8' }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+            <span style={{ fontSize: '11px', fontFamily: 'IBM Plex Mono, monospace', color: '#71717A' }}>
               {shortId}
             </span>
           </div>
@@ -44,38 +39,41 @@ export default function TopBar({ sandboxId, activeTab, onTabChange, status }) {
       </div>
 
       {/* Center — Tab switcher */}
-      <div className="flex items-center gap-1 p-1 rounded-lg"
-        style={{ background: '#0a0f1e', border: '1px solid #1e2d45' }}>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
         {[
-          { id: 'preview', icon: '⬛', label: 'Preview' },
-          { id: 'files', icon: '📄', label: 'Files' }
+          { id: 'preview', label: 'Preview' },
+          { id: 'files', label: 'Files' }
         ].map(tab => (
-          <button key={tab.id} onClick={() => onTabChange(tab.id)}
-            className="px-4 py-1 text-xs font-medium rounded-md transition-all duration-200 cursor-pointer"
-            style={activeTab === tab.id ? {
-              background: 'linear-gradient(135deg, rgba(34,211,238,0.15), rgba(8,145,178,0.08))',
-              color: '#22d3ee',
-              border: '1px solid rgba(34,211,238,0.3)'
-            } : {
-              color: '#475569',
-              border: '1px solid transparent'
-            }}>
+          <button
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            style={{
+              height: '32px', padding: '0 20px',
+              background: activeTab === tab.id ? '#0A0A0A' : 'transparent',
+              color: activeTab === tab.id ? '#FAFAFA' : '#71717A',
+              border: '1px solid ' + (activeTab === tab.id ? '#0A0A0A' : 'transparent'),
+              fontSize: '13px', fontWeight: activeTab === tab.id ? '500' : '400',
+              cursor: 'pointer', fontFamily: 'inherit',
+              transition: 'background 0.15s, color 0.15s, border-color 0.15s'
+            }}
+            onMouseEnter={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#0A0A0A' }}
+            onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.color = '#71717A' }}
+          >
             {tab.label}
           </button>
         ))}
       </div>
 
       {/* Right — status */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5">
-          {s.dot ? (
-            <div className="w-2 h-2 rounded-full" style={{ background: s.color, boxShadow: `0 0 8px ${s.color}` }} />
-          ) : (
-            <div className="w-4 h-4 rounded-full border-2 border-t-transparent"
-              style={{ borderColor: s.color, borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
-          )}
-          <span className="text-xs" style={{ color: s.color }}>{s.label}</span>
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {status === 'loading' ? (
+          <div className="animate-spin" style={{ width: '10px', height: '10px', border: '1.5px solid #D4D4D8', borderTopColor: '#CA8A04', borderRadius: '50%' }} />
+        ) : (
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: s.color, flexShrink: 0 }} />
+        )}
+        <span style={{ fontSize: '12px', fontWeight: '400', color: '#71717A' }}>
+          {s.label}
+        </span>
       </div>
     </header>
   )

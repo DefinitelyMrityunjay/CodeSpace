@@ -32,7 +32,7 @@ export default function FileViewer({ agentBase, filePath }) {
         } else {
           setError('File not found or empty')
         }
-      } catch (err) {
+      } catch {
         setError('Failed to load file')
       } finally {
         setLoading(false)
@@ -43,48 +43,51 @@ export default function FileViewer({ agentBase, filePath }) {
 
   if (!filePath) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3"
-        style={{ color: '#334155' }}>
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '12px' }}>
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#D4D4D8" strokeWidth="1">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
         </svg>
-        <p className="text-sm">Select a file from the explorer</p>
+        <p style={{ fontSize: '13px', fontWeight: '400', color: '#A1A1AA' }}>Select a file from the explorer</p>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* File tab bar */}
-      <div className="flex items-center gap-2 px-3 shrink-0"
-        style={{ height: '36px', background: '#070b14', borderBottom: '1px solid #1e2d45' }}>
-        <div className="flex items-center gap-2 px-3 py-1 rounded-t"
-          style={{ background: '#0d1424', border: '1px solid #1e2d45', borderBottom: 'none', marginBottom: '-1px' }}>
-          <span className="text-xs" style={{ color: '#94a3b8' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+
+      {/* Tab bar */}
+      <div style={{ display: 'flex', alignItems: 'stretch', height: '36px', background: '#FAFAFA', borderBottom: '1px solid #D4D4D8', flexShrink: 0 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '8px',
+          padding: '0 16px', background: '#FFFFFF',
+          borderRight: '1px solid #D4D4D8', borderTop: '2px solid #0A0A0A'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: '400', fontFamily: 'IBM Plex Mono, monospace', color: '#0A0A0A' }}>
             {filePath.split('/').pop()}
           </span>
-          <span className="text-xs px-1 rounded"
-            style={{ background: 'rgba(34,211,238,0.08)', color: '#475569' }}>
+          <span style={{ fontSize: '11px', color: '#A1A1AA', fontFamily: 'IBM Plex Mono, monospace' }}>
             {getLanguage(filePath)}
           </span>
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto relative" style={{ background: '#070b14' }}>
+      <div style={{ flex: 1, overflowY: 'auto', position: 'relative', background: '#FAFAFA' }}>
         {loading && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-6 h-6 rounded-full border-2 border-t-transparent"
-              style={{ borderColor: '#22d3ee', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div className="animate-spin" style={{ width: '16px', height: '16px', border: '1.5px solid #D4D4D8', borderTopColor: '#0A0A0A', borderRadius: '50%' }} />
           </div>
         )}
         {error && (
-          <div className="p-6 text-sm" style={{ color: '#ef4444' }}>{error}</div>
+          <div style={{ padding: '24px', fontSize: '13px', color: '#DC2626' }}>{error}</div>
         )}
         {content !== null && !loading && (
-          <pre className="p-4 text-xs leading-relaxed overflow-auto h-full"
-            style={{ color: '#94a3b8', fontFamily: '"JetBrains Mono", "Fira Code", monospace', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          <pre style={{
+            padding: '16px', fontSize: '13px', lineHeight: '1.65',
+            color: '#0A0A0A', fontFamily: 'IBM Plex Mono, monospace',
+            margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word'
+          }}>
             <code>{content}</code>
           </pre>
         )}

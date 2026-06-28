@@ -32,6 +32,7 @@ The AI agent reads, creates, and updates files directly inside the running pod i
 - [Local Setup](#local-setup)
 - [Environment Variables](#environment-variables)
 - [API Reference](#api-reference)
+- [Troubleshooting](#troubleshooting)
 - [Security Considerations](#security-considerations)
 - [Known Issues](#known-issues)
 - [Roadmap](#roadmap)
@@ -43,7 +44,7 @@ The AI agent reads, creates, and updates files directly inside the running pod i
 ## Architecture Overview
 
 ```
-Browser (React + Vite frontend @ localhost:5173)
+Browser (React + Vite frontend @ localhost:5174)
     ↓ HTTP / WebSocket / SSE
 Vite dev server proxy → localhost:18080
     ↓
@@ -85,7 +86,7 @@ Handles Google OAuth 2.0 login, JWT issuance, user persistence in MongoDB, and d
 Hosts the LangGraph ReAct agent. Streams AI responses to the frontend via SSE. Proxies file tool calls to the per-sandbox agent sidecar.
 
 - **Port:** 3000 (ClusterIP :80)
-- **Replicas:** 1 (local) / 2 (prod)
+- **Replicas:** 2
 - **Model:** `mistral-large-latest`
 - **Key packages:** `@langchain/mistralai`, `@langchain/langgraph`, `langchain`, `axios`, `zod`
 
@@ -198,17 +199,27 @@ File writes land on the shared `emptyDir` volume. Vite's watcher detects changes
 | Docker Desktop | 4.x | Container runtime + minikube driver |
 | kubectl | 1.28+ | Cluster management |
 | minikube | latest | Local Kubernetes cluster |
+| skaffold | v2+ | Build images + apply manifests in one command |
 
-> Skaffold is **not** required for local development. Images are built directly into minikube's Docker daemon.
+Install skaffold:
+```bash
+brew install skaffold          # macOS
+# or
+curl -Lo skaffold https://storage.googleapis.com/skaffold/releases/latest/skaffold-darwin-arm64 && chmod +x skaffold && sudo mv skaffold /usr/local/bin
+```
 
 ---
 
 ## Local Setup
 
-### 1. Start minikube
+### 1. Start Docker Desktop
+
+Make sure Docker Desktop is running before anything else — minikube uses it as its driver.
+
+### 2. Start minikube
 
 ```bash
-minikube start --driver=docker --memory=4096 --cpus=4
+minikube start --driver=docker --memory=8192 --cpus=4
 minikube addons enable ingress
 ```
 
@@ -221,72 +232,38 @@ kubectl wait --namespace ingress-nginx \
   --timeout=120s
 ```
 
-### 2. Apply secrets
+> **Memory:** 8 GB is recommended. Each sandbox pod requests ~400 MB (2 containers × 200 MB). The system services (auth, ai ×2, router, sandbox, notification, ingress-nginx) consume another ~1–1.5 GB. With 4 GB you can run at most 2 sandboxes at a time before the cluster runs out of memory.
+
+### 3. Configure secrets
 
 ```bash
-# Copy the example and fill in your credentials
-cp k8s/secrets.yml k8s/secrets.local.yml
-# Edit k8s/secrets.local.yml with real values (MongoDB, Redis, RabbitMQ, Google OAuth, Mistral)
-
-kubectl apply -f k8s/secrets.local.yml
+# Copy the example file and fill in your credentials
+cp k8s/secrets.yml.example k8s/secrets.local.yml
 ```
+
+Edit `k8s/secrets.local.yml` and set:
+
+| Secret key | Where to get it |
+|------------|----------------|
+| `AUTH` / `SANDBOX` / `AI` | MongoDB Atlas connection strings |
+| `REDIS_URL` | Upstash / Redis Cloud / self-hosted |
+| `RABBITMQ_URL` | CloudAMQP or self-hosted |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials |
+| `JWT_SECRET` | Any random string ≥ 32 characters |
+| `MISTRAL_API_KEY` | console.mistral.ai |
+| `EMAIL_USER` / `GOOGLE_REFRESH_TOKEN` | Gmail OAuth2 setup (for notification emails) |
 
 > **Never commit `k8s/secrets.local.yml`** — it is gitignored.
 
-### 3. Build all images into minikube
-
-Point your shell at minikube's Docker daemon, then build each image:
-
-```bash
-eval $(minikube docker-env)
-
-docker build -t sandbox    sandbox/server/
-docker build -t router     sandbox/router/
-docker build -t agent      sandbox/agent/
-docker build -t template   sandbox/template/
-docker build -t auth       auth/
-docker build -t ai-orchestration  ai-orchestration/
+Update `skaffold.yml` to point to your local secrets file:
+```yaml
+manifests:
+  rawYaml:
+    - k8s/secrets.local.yml   # ← change from secrets.yml
+    ...
 ```
 
-### 4. Apply Kubernetes manifests
-
-```bash
-kubectl apply -f k8s/rbac.yml
-kubectl apply -f k8s/sandbox-service.yml
-kubectl apply -f k8s/sandbox-deployment.yml
-kubectl apply -f k8s/auth-service.yml
-kubectl apply -f k8s/auth-deployment.yml
-kubectl apply -f k8s/router-service.yml
-kubectl apply -f k8s/router-deployment.yml
-kubectl apply -f k8s/ai-service.yml
-kubectl apply -f k8s/ai-deployment.yml
-kubectl apply -f k8s/ingress.yml
-```
-
-Verify everything is running:
-
-```bash
-kubectl get pods
-# Expected: sandbox-deployment, auth-deployment, router-deployment, ai-deployment all 1/1 Running
-```
-
-### 5. Start the port-forward (keep this terminal open)
-
-Docker Desktop owns port 80 on macOS. This port-forward routes all traffic through port 18080 directly to the nginx ingress pod, bypassing Docker Desktop:
-
-```bash
-./start-local.sh
-```
-
-This script runs in a loop and automatically restarts if the ingress pod is replaced. Keep it running in a dedicated terminal for the duration of your session.
-
-To start it manually (without auto-restart):
-
-```bash
-kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 18080:80
-```
-
-### 6. Configure Google OAuth callback URL
+### 4. Configure Google OAuth callback URL
 
 In [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials), open your OAuth 2.0 client and add this to **Authorized redirect URIs**:
 
@@ -294,7 +271,55 @@ In [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/
 http://localhost:18080/api/auth/google/callback
 ```
 
-### 7. Start the frontend
+### 5. Configure the frontend environment
+
+```bash
+echo "VITE_SUBDOMAIN_PORT=18080" > frontend/.env.local
+```
+
+### 6. Build all images and deploy with skaffold
+
+Point your shell at minikube's Docker daemon, then run skaffold:
+
+```bash
+eval $(minikube docker-env)
+skaffold run
+```
+
+`skaffold run` builds every Docker image directly into minikube (no registry needed), applies all Kubernetes manifests, and waits for deployments to stabilise. This takes ~2–5 minutes on first run, much faster on subsequent runs thanks to Docker layer caching.
+
+Verify all pods are running:
+
+```bash
+kubectl get pods
+# Expected output:
+# ai-deployment-xxx          1/1     Running
+# ai-deployment-xxx          1/1     Running
+# auth-deployment-xxx        1/1     Running
+# notification-deployment-xxx 1/1    Running
+# router-deployment-xxx      1/1     Running
+# sandbox-deployment-xxx     1/1     Running
+```
+
+### 7. Start the port-forward
+
+Docker Desktop owns port 80 on macOS. This port-forward routes all traffic through port 18080 directly to the nginx ingress pod:
+
+```bash
+./start-local.sh
+```
+
+Keep this running in a **dedicated terminal** for the duration of your session. It auto-restarts if the ingress pod is replaced.
+
+To run it manually (without auto-restart):
+
+```bash
+kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 18080:80
+```
+
+### 8. Start the frontend
+
+In a separate terminal:
 
 ```bash
 cd frontend
@@ -302,14 +327,14 @@ npm install        # first time only
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:5174** in your browser.
 
-### 8. Sign in and create a sandbox
+### 9. Sign in and create a sandbox
 
 1. Click **Continue with Google** on the splash screen
-2. Complete the Google OAuth flow — you'll be redirected back to `localhost:5173`
+2. Complete the Google OAuth flow — you'll be redirected back to `localhost:5174`
 3. Enter a project name and click **Create New Project**
-4. The sandbox pod will spin up (~30 seconds for the first run while images are pulled)
+4. The sandbox pod spins up in ~10–30 seconds
 
 ---
 
@@ -318,25 +343,16 @@ Open **http://localhost:5173** in your browser.
 Minikube state persists across reboots but the port-forward does not. Each new session:
 
 ```bash
-# 1. Make sure minikube is running
-minikube status || minikube start --driver=docker --memory=4096 --cpus=4
+# Terminal 1 — ensure cluster is up, then redeploy (fast: images are cached)
+minikube status || minikube start --driver=docker --memory=8192 --cpus=4
+eval $(minikube docker-env)
+skaffold run
 
-# 2. Start the port-forward
-./start-local.sh   # keep this terminal open
+# Terminal 2 — port-forward (keep open)
+./start-local.sh
 
-# 3. Start the frontend (separate terminal)
+# Terminal 3 — frontend dev server
 cd frontend && npm run dev
-```
-
-If you see pods in `Pending` state (usually means the cluster is out of memory from a previous session):
-
-```bash
-# List stuck sandbox pods
-kubectl get pods | grep sandbox-pod
-
-# Delete them all at once
-kubectl delete pods -l sandboxId --ignore-not-found
-kubectl delete svc -l sandboxId --ignore-not-found
 ```
 
 ---
@@ -345,38 +361,39 @@ kubectl delete svc -l sandboxId --ignore-not-found
 
 ### Auth Service
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `AUTH_MONGO_URI` | MongoDB Atlas connection string for the auth DB | ✅ |
-| `RABBITMQ_URL` | CloudAMQP / RabbitMQ AMQPS URL | ✅ |
-| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 client ID | ✅ |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 client secret | ✅ |
-| `JWT_SECRET` | HMAC secret for JWT signing (min 32 chars) | ✅ |
-| `GOOGLE_CALLBACK_URL` | OAuth callback URL — set to `http://localhost:18080/api/auth/google/callback` for local dev | ✅ |
+| Variable | Description |
+|----------|-------------|
+| `AUTH_MONGO_URI` | MongoDB Atlas connection string for the auth DB |
+| `RABBITMQ_URL` | CloudAMQP / RabbitMQ AMQPS URL |
+| `GOOGLE_CLIENT_ID` | Google OAuth 2.0 client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 client secret |
+| `JWT_SECRET` | HMAC secret for JWT signing (min 32 chars) |
+| `GOOGLE_CALLBACK_URL` | Set to `http://localhost:18080/api/auth/google/callback` for local dev |
 
 ### AI Orchestration Service
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `MISTRAL_API_KEY` | MistralAI API key | ✅ |
+| Variable | Description |
+|----------|-------------|
+| `MISTRAL_API_KEY` | MistralAI API key |
+| `AI` | MongoDB connection string for the AI DB |
 
 ### Notification Service
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `RABBITMQ_URL` | RabbitMQ connection URL | ✅ |
-| `EMAIL_USER` | Gmail address for sending notifications | ✅ |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID for Gmail OAuth2 | ✅ |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | ✅ |
-| `GOOGLE_REFRESH_TOKEN` | Gmail OAuth2 refresh token | ✅ |
+| Variable | Description |
+|----------|-------------|
+| `RABBITMQ_URL` | RabbitMQ connection URL |
+| `EMAIL_USER` | Gmail address for sending notifications |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID for Gmail OAuth2 |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `GOOGLE_REFRESH_TOKEN` | Gmail OAuth2 refresh token |
 
 ### Sandbox Server & Router
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `REDIS_URL` | Redis connection URL (`redis://` or `rediss://`) | ✅ |
-| `MONGO_URI` / `SANDBOX` | MongoDB connection string for sandbox DB | ✅ |
-| `JWT_SECRET` | Same secret as auth service — used to verify tokens | ✅ |
+| Variable | Description |
+|----------|-------------|
+| `REDIS_URL` | Redis connection URL (`redis://` or `rediss://`) |
+| `SANDBOX` | MongoDB connection string for sandbox DB |
+| `JWT_SECRET` | Same secret as auth service — used to verify tokens |
 
 ### Frontend
 
@@ -394,7 +411,7 @@ kubectl delete svc -l sandboxId --ignore-not-found
 |--------|------|-------------|
 | `GET` | `/api/auth/google` | Initiates Google OAuth redirect |
 | `GET` | `/api/auth/google/callback` | OAuth callback; upserts user; sets JWT cookie; redirects to frontend |
-| `GET` | `/api/auth/me` | Returns `{ authenticated, userId }` — used by frontend to check login state |
+| `GET` | `/api/auth/me` | Returns authenticated user object — used by frontend to check login state |
 | `GET` | `/_status/healthz` | Liveness probe |
 
 ### Sandbox Server
@@ -405,14 +422,12 @@ kubectl delete svc -l sandboxId --ignore-not-found
 | `GET` | `/api/sandbox/project` | ✅ | Lists all projects for the authenticated user |
 | `POST` | `/api/sandbox/start` | ✅ | Tears down previous sandbox, creates new pod + service + Redis TTL; body: `{ projectId }` |
 | `POST` | `/api/sandbox/stop` | ✅ | Immediately deletes pod + service; body: `{ sandboxId }` |
-| `GET` | `/api/sandbox/health` | — | Health check |
 
 ### AI Orchestration Service
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/ai/invoke` | Body: `{ message, projectId }`. Streams agent activity + final response via SSE (`text/event-stream`) |
-| `GET` | `/api/status/healthz` | Liveness probe |
 
 ### Sandbox Agent (per-sandbox via `{id}.agent.lvh.me:18080`)
 
@@ -429,6 +444,88 @@ kubectl delete svc -l sandboxId --ignore-not-found
 |-------|-----------|---------|
 | `terminal-output` | Server → Client | Raw PTY data |
 | `terminal-input` | Client → Server | Keystrokes |
+
+---
+
+## Troubleshooting
+
+### Sandbox pods stuck in `Pending` — "Insufficient memory"
+
+Stale sandbox pods from a previous session are consuming all cluster memory. Delete them:
+
+```bash
+# Delete all sandbox pods and their services
+kubectl delete pods -l sandboxId --ignore-not-found
+kubectl delete svc -l sandboxId --ignore-not-found
+```
+
+If that doesn't fully free space, delete by name:
+
+```bash
+kubectl get pods | grep sandbox-pod
+kubectl delete pod <pod-name> ...
+
+kubectl get svc | grep sandbox-service
+kubectl delete svc <svc-name> ...
+```
+
+Then refresh the browser and create a new sandbox.
+
+To avoid this in future sessions, give minikube more memory:
+```bash
+minikube stop
+minikube config set memory 8192
+minikube start
+```
+
+### Ingress 404 — "failed calling webhook validate.nginx.ingress.kubernetes.io"
+
+The nginx admission webhook has a stale TLS certificate (happens after cluster recreation). Fix:
+
+```bash
+kubectl delete ValidatingWebhookConfiguration ingress-nginx-admission
+```
+
+Then re-run `skaffold run` — the ingress will apply cleanly.
+
+### Port 18080 not listening / API calls failing
+
+The port-forward isn't running. Start it:
+
+```bash
+./start-local.sh
+```
+
+Verify with:
+```bash
+curl http://localhost:18080/api/auth/me
+# Expected: {"error":"Not authenticated"}
+```
+
+### Google OAuth redirect fails
+
+1. Confirm `http://localhost:18080/api/auth/google/callback` is listed in **Authorized redirect URIs** in Google Cloud Console
+2. Confirm the auth pod is running: `kubectl get pods | grep auth`
+3. Check auth pod logs: `kubectl logs deployment/auth-deployment`
+
+### Preview / terminal / files unreachable after creating a sandbox
+
+The sandbox pod might not have started yet. Check:
+
+```bash
+kubectl get pods | grep sandbox-pod
+```
+
+If status is `Pending`, see the memory fix above. If `CrashLoopBackOff`, check logs:
+
+```bash
+kubectl logs <sandbox-pod-name> -c sandbox-container
+kubectl logs <sandbox-pod-name> -c agent-container
+```
+
+### Frontend shows wrong port (5173 vs 5174)
+
+If another Vite project is running on 5173, this project auto-increments to 5174. The vite config is set to 5174 explicitly. If you see 5173 somewhere, it's a different project.
 
 ---
 

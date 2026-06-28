@@ -1,20 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 
-const FILE_ICONS = {
-  jsx: '⚛', tsx: '⚛', js: '🟡', ts: '🔷',
-  css: '🎨', html: '🌐', json: '{}', md: '📝',
-  png: '🖼', svg: '🔶', jpg: '🖼', jpeg: '🖼',
-  env: '🔒', gitignore: '🙈', dockerfile: '🐳',
-  default: '📄'
-}
-
-function getIcon(filename) {
-  const parts = filename.split('.')
-  if (parts.length === 1) return FILE_ICONS.default
-  const ext = parts[parts.length - 1].toLowerCase()
-  return FILE_ICONS[ext] || FILE_ICONS.default
-}
-
 function buildTree(files) {
   const root = {}
   files.forEach(path => {
@@ -34,21 +19,34 @@ function TreeNode({ name, node, depth, agentBase, activeFile, onFileSelect, path
   const fullPath = path ? `${path}/${name}` : name
   const isActive = activeFile === fullPath
 
+  const baseRow = {
+    display: 'flex', alignItems: 'center', gap: '6px',
+    width: '100%', textAlign: 'left', border: 'none', cursor: 'pointer',
+    height: '28px', paddingRight: '12px',
+    paddingLeft: `${12 + depth * 14}px`,
+    fontSize: '13px', fontFamily: 'Inter, sans-serif',
+    transition: 'background 0.1s, color 0.1s',
+    background: 'transparent',
+    borderLeft: '2px solid transparent',
+  }
+
   if (isDir) {
     return (
       <div>
-        <button onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-1.5 w-full text-left px-2 py-0.5 rounded transition-colors duration-100 cursor-pointer"
-          style={{
-            paddingLeft: `${8 + depth * 14}px`,
-            color: '#94a3b8',
-            fontSize: '13px'
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-          <span className="text-xs transition-transform duration-150" style={{ transform: open ? 'rotate(90deg)' : 'none', display: 'inline-block' }}>▶</span>
-          <span className="mr-1">{open ? '📂' : '📁'}</span>
-          <span className="truncate">{name}</span>
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{ ...baseRow, color: '#3F3F46' }}
+          onMouseEnter={e => e.currentTarget.style.background = '#F4F4F5'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          <span style={{
+            fontSize: '8px', flexShrink: 0, color: '#A1A1AA',
+            transition: 'transform 0.15s', display: 'inline-block',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)'
+          }}>▶</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: '400' }}>
+            {name}
+          </span>
         </button>
         {open && (
           <div>
@@ -68,19 +66,19 @@ function TreeNode({ name, node, depth, agentBase, activeFile, onFileSelect, path
   }
 
   return (
-    <button onClick={() => onFileSelect(fullPath)}
-      className="flex items-center gap-1.5 w-full text-left px-2 py-0.5 rounded transition-all duration-100 cursor-pointer"
+    <button
+      onClick={() => onFileSelect(fullPath)}
       style={{
-        paddingLeft: `${8 + depth * 14}px`,
-        fontSize: '13px',
-        color: isActive ? '#22d3ee' : '#94a3b8',
-        background: isActive ? 'rgba(34,211,238,0.08)' : 'transparent',
-        borderLeft: isActive ? '2px solid #22d3ee' : '2px solid transparent'
+        ...baseRow,
+        color: isActive ? '#0A0A0A' : '#71717A',
+        background: isActive ? '#F4F4F5' : 'transparent',
+        fontWeight: isActive ? '500' : '400',
+        borderLeft: isActive ? '2px solid #0A0A0A' : '2px solid transparent',
       }}
-      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; e.currentTarget.style.color = '#e2e8f0' } }}
-      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#94a3b8' } }}>
-      <span>{getIcon(name)}</span>
-      <span className="truncate">{name}</span>
+      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#F4F4F5'; e.currentTarget.style.color = '#0A0A0A' } }}
+      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#71717A' } }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
     </button>
   )
 }
@@ -100,7 +98,7 @@ export default function FileExplorer({ agentBase, activeFile, onFileSelect, refr
       const data = await res.json()
       setFiles(data.files || [])
       setTree(buildTree(data.files || []))
-    } catch (err) {
+    } catch {
       setError('Failed to load files')
     } finally {
       setLoading(false)
@@ -110,36 +108,35 @@ export default function FileExplorer({ agentBase, activeFile, onFileSelect, refr
   useEffect(() => { fetchFiles() }, [fetchFiles, refreshKey])
 
   return (
-    <aside className="flex flex-col h-full"
-      style={{ width: '220px', minWidth: '220px', background: '#0d1424', borderRight: '1px solid #1e2d45' }}>
-      
+    <aside style={{ width: '220px', minWidth: '220px', height: '100%', display: 'flex', flexDirection: 'column', background: '#FFFFFF', borderRight: '1px solid #D4D4D8' }}>
+
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 shrink-0"
-        style={{ borderBottom: '1px solid #1e2d45' }}>
-        <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: '#475569' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', height: '36px', borderBottom: '1px solid #D4D4D8', flexShrink: 0 }}>
+        <span style={{ fontSize: '11px', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#71717A' }}>
           Explorer
         </span>
-        <button onClick={fetchFiles} className="p-1 rounded transition-colors cursor-pointer"
-          style={{ color: '#475569' }}
-          onMouseEnter={e => e.currentTarget.style.color = '#22d3ee'}
-          onMouseLeave={e => e.currentTarget.style.color = '#475569'}
-          title="Refresh">
+        <button
+          onClick={fetchFiles}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#A1A1AA', display: 'flex', alignItems: 'center', transition: 'color 0.15s' }}
+          onMouseEnter={e => e.currentTarget.style.color = '#0A0A0A'}
+          onMouseLeave={e => e.currentTarget.style.color = '#A1A1AA'}
+          title="Refresh"
+        >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            <path d="M23 4v6h-6M1 20v-6h6" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
         </button>
       </div>
 
       {/* File Tree */}
-      <div className="flex-1 overflow-y-auto py-1">
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
         {loading ? (
-          <div className="flex items-center justify-center h-20">
-            <div className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin"
-              style={{ borderColor: '#22d3ee', borderTopColor: 'transparent' }} />
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '64px' }}>
+            <div className="animate-spin" style={{ width: '14px', height: '14px', border: '1.5px solid #D4D4D8', borderTopColor: '#0A0A0A', borderRadius: '50%' }} />
           </div>
         ) : error ? (
-          <div className="px-3 py-4 text-xs" style={{ color: '#ef4444' }}>{error}</div>
+          <div style={{ padding: '12px', fontSize: '12px', color: '#DC2626' }}>{error}</div>
         ) : (
           Object.entries(tree).sort(([, a], [, b]) => {
             const aDir = a !== null && typeof a === 'object'
@@ -153,10 +150,10 @@ export default function FileExplorer({ agentBase, activeFile, onFileSelect, refr
         )}
       </div>
 
-      {/* Footer — file count */}
+      {/* Footer */}
       {!loading && files.length > 0 && (
-        <div className="px-3 py-1.5 shrink-0" style={{ borderTop: '1px solid #1e2d45' }}>
-          <span className="text-xs" style={{ color: '#334155' }}>{files.length} files</span>
+        <div style={{ padding: '5px 12px', borderTop: '1px solid #D4D4D8', flexShrink: 0 }}>
+          <span style={{ fontSize: '11px', color: '#A1A1AA' }}>{files.length} files</span>
         </div>
       )}
     </aside>

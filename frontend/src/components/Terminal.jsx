@@ -17,29 +17,29 @@ export default function Terminal({ sandboxId }) {
 
     const term = new XTerm({
       theme: {
-        background: '#070b14',
-        foreground: '#e2e8f0',
-        cursor: '#22d3ee',
-        cursorAccent: '#070b14',
-        selectionBackground: 'rgba(34,211,238,0.2)',
-        black: '#1e2d45',
-        red: '#ef4444',
-        green: '#10b981',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#a78bfa',
-        cyan: '#22d3ee',
-        white: '#e2e8f0',
-        brightBlack: '#334155',
-        brightRed: '#f87171',
-        brightGreen: '#34d399',
-        brightYellow: '#fbbf24',
-        brightBlue: '#60a5fa',
-        brightMagenta: '#c4b5fd',
-        brightCyan: '#67e8f9',
-        brightWhite: '#f8fafc',
+        background: '#0A0A0A',
+        foreground: '#FAFAFA',
+        cursor: '#FAFAFA',
+        cursorAccent: '#0A0A0A',
+        selectionBackground: 'rgba(255,255,255,0.15)',
+        black: '#1C1C1E',
+        red: '#DC2626',
+        green: '#16A34A',
+        yellow: '#CA8A04',
+        blue: '#2563EB',
+        magenta: '#7C3AED',
+        cyan: '#0891B2',
+        white: '#FAFAFA',
+        brightBlack: '#52525B',
+        brightRed: '#EF4444',
+        brightGreen: '#22C55E',
+        brightYellow: '#EAB308',
+        brightBlue: '#3B82F6',
+        brightMagenta: '#8B5CF6',
+        brightCyan: '#06B6D4',
+        brightWhite: '#FAFAFA',
       },
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
+      fontFamily: '"IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace',
       fontSize: 13,
       lineHeight: 1.5,
       cursorBlink: true,
@@ -58,11 +58,8 @@ export default function Terminal({ sandboxId }) {
     termRef.current = term
     fitAddonRef.current = fitAddon
 
-    term.writeln('\x1b[36m╔══════════════════════════════════════╗\x1b[0m')
-    term.writeln('\x1b[36m║   \x1b[1mSandbox Terminal\x1b[0m\x1b[36m                  ║\x1b[0m')
-    term.writeln('\x1b[36m╚══════════════════════════════════════╝\x1b[0m')
+    term.writeln('\x1b[2mSandbox Terminal — connecting…\x1b[0m')
     term.writeln('')
-    term.writeln('\x1b[33mConnecting to sandbox...\x1b[0m')
 
     return term
   }, [])
@@ -85,19 +82,19 @@ export default function Terminal({ sandboxId }) {
       socket.on('connect', () => {
         setConnected(true)
         setError(null)
-        term.writeln('\x1b[32m✓ Connected to sandbox shell\x1b[0m')
+        term.writeln('\x1b[32mConnected to sandbox shell\x1b[0m')
         term.writeln('')
       })
 
       socket.on('disconnect', () => {
         setConnected(false)
-        term.writeln('\r\n\x1b[33m⚠ Disconnected. Reconnecting...\x1b[0m')
+        term.writeln('\r\n\x1b[33mDisconnected. Reconnecting…\x1b[0m')
       })
 
       socket.on('connect_error', (err) => {
         setConnected(false)
         setError('Connection failed')
-        term.writeln(`\r\n\x1b[31m✗ Connection error: ${err.message}\x1b[0m`)
+        term.writeln(`\r\n\x1b[31mConnection error: ${err.message}\x1b[0m`)
       })
 
       socket.on('terminal-output', (data) => {
@@ -123,7 +120,6 @@ export default function Terminal({ sandboxId }) {
     }
   }, [initTerminal, connectSocket])
 
-  // Handle resize
   useEffect(() => {
     const observer = new ResizeObserver(() => {
       if (fitAddonRef.current) {
@@ -135,34 +131,28 @@ export default function Terminal({ sandboxId }) {
   }, [])
 
   return (
-    <div className="flex flex-col h-full"
-      style={{ background: '#070b14' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0A0A0A' }}>
 
-      {/* Terminal toolbar */}
-      <div className="flex items-center justify-between px-3 shrink-0"
-        style={{ height: '32px', background: '#0d1424', borderBottom: '1px solid #1e2d45' }}>
-        <div className="flex items-center gap-2">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2">
-            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', height: '32px', background: '#0A0A0A', borderBottom: '1px solid #1C1C1E', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#52525B" strokeWidth="2">
+            <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
           </svg>
-          <span className="text-xs font-medium" style={{ color: '#475569' }}>Terminal</span>
+          <span style={{ fontSize: '12px', fontWeight: '400', color: '#52525B', fontFamily: 'IBM Plex Mono, monospace' }}>Terminal</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {error && (
-            <span className="text-xs" style={{ color: '#ef4444' }}>{error}</span>
+            <span style={{ fontSize: '11px', color: '#DC2626', fontFamily: 'IBM Plex Mono, monospace' }}>{error}</span>
           )}
-          <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full"
-              style={{ background: connected ? '#10b981' : '#ef4444', boxShadow: `0 0 6px ${connected ? '#10b981' : '#ef4444'}` }} />
-            <span className="text-xs" style={{ color: '#475569' }}>
-              {connected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: connected ? '#16A34A' : '#DC2626', flexShrink: 0 }} />
+          <span style={{ fontSize: '11px', color: '#52525B' }}>
+            {connected ? 'Connected' : 'Disconnected'}
+          </span>
         </div>
       </div>
 
-      {/* xterm container */}
-      <div ref={containerRef} className="flex-1 overflow-hidden" />
+      <div ref={containerRef} style={{ flex: 1, overflow: 'hidden' }} />
     </div>
   )
 }
