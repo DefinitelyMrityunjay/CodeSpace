@@ -16,7 +16,7 @@ app.use(morgan('dev'));
 app.use(cookies());
 app.use(passport.initialize());
 app.use(cors({
-    origin: [ 'https://www.cryboy.in', /\.cryboy\.in$/ ],
+    origin: ['http://localhost:5173', 'http://localhost'],
     credentials: true,   // critical — allows cookies in cross-origin requests
     methods: [ 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS' ],
 }));
@@ -25,7 +25,7 @@ app.use(cors({
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "https://www.cryboy.in/api/auth/google/callback"
+    callbackURL: "http://localhost/api/auth/google/callback"
 }, (accessToken, refreshToken, profile, done) => {
     // Here you would typically find or create a user in your database
     // For this example, we'll just return the profile

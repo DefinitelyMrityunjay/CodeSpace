@@ -13,10 +13,10 @@
 
 codeSpace is a browser-based cloud IDE that provisions isolated, per-user React + Vite sandbox environments on demand inside a Kubernetes cluster. Each sandbox runs as a dedicated pod pre-loaded with a starter template. Users interact with a VS Code–style UI that includes:
 
-- 🖥️ **Live preview pane** — instant HMR-powered preview
-- 📁 **File explorer** — browse and view your project files
-- 💻 **Integrated terminal** — full PTY-backed shell inside the pod
-- 🤖 **AI chat panel** — powered by Mistral Large via LangChain/LangGraph
+- **Live preview pane** — instant HMR-powered preview
+- **File explorer** — browse and view your project files
+- **Integrated terminal** — full PTY-backed shell inside the pod
+- **AI chat panel** — powered by Mistral Large via LangChain/LangGraph
 
 The AI agent reads, creates, and updates files directly inside the running pod in real time, triggering Vite's HMR so changes appear instantly — no full reload required.
 
@@ -43,27 +43,33 @@ The AI agent reads, creates, and updates files directly inside the running pod i
 ## Architecture Overview
 
 ```
-Browser (React + Vite frontend)
+Browser (React + Vite frontend @ localhost:5173)
     ↓ HTTP / WebSocket / SSE
-nginx Ingress Controller
+Vite dev server proxy → localhost:18080
+    ↓
+kubectl port-forward → nginx Ingress Controller (pod port 80)
     ↓
 Core services:  auth · sandbox · ai · router · notification
     ↓ Kubernetes API
 Per-sandbox pods:  template container + agent container (shared /workspace volume)
     ↓
 External managed services:
-    MongoDB Atlas · Redis · RabbitMQ · MistralAI · Gmail SMTP
+    MongoDB Atlas · Redis · RabbitMQ · MistralAI
 ```
 
 ### Ingress routing
 
-| Host | Routes to |
-|------|-----------|
+| Host / Path | Routes to |
+|-------------|-----------|
 | `*/api/auth` | auth-service |
 | `*/api/sandbox` | sandbox-service |
 | `*/api/ai` | ai-service |
-| `*.preview.localhost` | router-service → Vite dev server |
-| `*.agent.localhost` | router-service → agent sidecar |
+| `*.preview.lvh.me` | router-service → Vite dev server (port 5173) |
+| `*.agent.lvh.me` | router-service → agent sidecar (port 3000) |
+
+> **Why `lvh.me`?** `lvh.me` is a public wildcard DNS that resolves all subdomains to `127.0.0.1`. No local DNS configuration needed.
+
+> **Why port 18080?** On macOS with the Docker driver, Docker Desktop binds port 80. A `kubectl port-forward` on 18080 bypasses this.
 
 ---
 
@@ -73,26 +79,25 @@ External managed services:
 Handles Google OAuth 2.0 login, JWT issuance, user persistence in MongoDB, and dispatches login events to RabbitMQ.
 
 - **Port:** 3000 (ClusterIP :80)
-- **Replicas:** 1
 - **Key packages:** `passport`, `passport-google-oauth20`, `jsonwebtoken`, `mongoose`, `amqplib`
 
 ### AI Orchestration Service (`ai-orchestration/`)
 Hosts the LangGraph ReAct agent. Streams AI responses to the frontend via SSE. Proxies file tool calls to the per-sandbox agent sidecar.
 
 - **Port:** 3000 (ClusterIP :80)
-- **Replicas:** 2
+- **Replicas:** 1 (local) / 2 (prod)
 - **Model:** `mistral-large-latest`
 - **Key packages:** `@langchain/mistralai`, `@langchain/langgraph`, `langchain`, `axios`, `zod`
 
 ### Sandbox Server (`sandbox/server/`)
-Provisions new sandbox pods and per-sandbox K8s services. Registers sandbox TTL keys in Redis. Listens for Redis keyspace expiry events to clean up dead sandboxes.
+Provisions new sandbox pods and per-sandbox K8s services. Registers sandbox TTL keys in Redis. Listens for Redis keyspace expiry events to clean up dead sandboxes. Cleans up the previous sandbox for a project when a new one is started.
 
 - **Port:** 3000 (ClusterIP :80)
 - **Service account:** `resource-manager` (RBAC: pods + services in default namespace)
 - **Key packages:** `@kubernetes/client-node`, `ioredis`, `uuid`
 
 ### Sandbox Router (`sandbox/router/`)
-Subdomain-based reverse proxy. Routes `{id}.preview.localhost` and `{id}.agent.localhost` to the correct per-sandbox ClusterIP service. Refreshes the sandbox Redis TTL on every request.
+Subdomain-based reverse proxy. Routes `{id}.preview.lvh.me` and `{id}.agent.lvh.me` to the correct per-sandbox ClusterIP service. Refreshes the sandbox Redis TTL on every request.
 
 - **Port:** 3000 (ClusterIP :80)
 - **Key packages:** `http-proxy-middleware`, `httpxy`, `ioredis`
@@ -113,15 +118,15 @@ Runs inside every sandbox pod. Exposes a REST API for file operations on `/works
 Pre-built React + Vite project. Used as both the init container (seeds the shared volume) and the main runtime container (runs `npm run dev`).
 
 ### Frontend (`frontend/`)
-Browser-based IDE. React 19 + Vite 8 + Tailwind CSS v4.
+Browser-based IDE. React 19 + Vite + Tailwind CSS v4.
 
 | Component | Purpose |
 |-----------|---------|
-| `SplashScreen` | Landing page; calls `POST /api/sandbox/start` |
+| `SplashScreen` | Landing page; Google login + project list + create form |
 | `TopBar` | Tab switcher (Preview / Files), sandbox ID, status |
 | `FileExplorer` | Tree-view sidebar; refreshes on AI edits |
 | `FileViewer` | Read-only code viewer |
-| `PreviewFrame` | `iframe` pointing to `{id}.preview.localhost` |
+| `PreviewFrame` | `iframe` pointing to `{id}.preview.lvh.me:18080` |
 | `Terminal` | xterm.js terminal over Socket.IO |
 | `AiChat` | Chat panel; consumes SSE; renders activity log |
 
@@ -131,12 +136,16 @@ Browser-based IDE. React 19 + Vite 8 + Tailwind CSS v4.
 
 ### Provisioning
 
-1. User clicks **Create Sandbox** on the splash screen
-2. Frontend posts to `POST /api/sandbox/start`
-3. Sandbox server generates a UUIDv7 → `sandboxId`
-4. Creates `sandbox-pod-{id}` and `sandbox-service-{id}` in Kubernetes
-5. Stores `sandbox:{id}` in Redis with a 120-second TTL
-6. Returns `{ sandboxId, previewUrl: "http://{id}.preview.localhost" }`
+1. User signs in via Google OAuth and clicks **Create New Project**
+2. Frontend posts to `POST /api/sandbox/project` → creates a project record in MongoDB
+3. Frontend posts to `POST /api/sandbox/start` → sandbox server:
+   - Tears down the previous sandbox for this project (if any)
+   - Generates a UUIDv7 → `sandboxId`
+   - Creates `sandbox-pod-{id}` and `sandbox-service-{id}` in Kubernetes
+   - Stores `sandbox:{id}` in Redis with a 20-minute TTL
+   - Saves `currentSandboxId` on the project record
+4. Returns `{ sandboxId, previewUrl }`
+5. On page reload, the frontend probes the agent via `sessionStorage` — if alive it reconnects without creating a new sandbox
 
 ### Pod structure
 
@@ -150,8 +159,10 @@ Both containers mount the same `emptyDir` volume at `/workspace`. Writes from th
 
 ### TTL & cleanup
 
-- Every request through the Router refreshes the TTL: `EXPIRE sandbox:{id} 120`
-- When a key expires (120s of inactivity), the sandbox server deletes the pod and service with `gracePeriodSeconds: 0`
+- Every request through the Router refreshes the TTL: `EXPIRE sandbox:{id} 1200`
+- When a key expires (20 min of inactivity), the sandbox server deletes the pod and service
+- `POST /api/sandbox/stop` provides explicit immediate teardown (called on page unload)
+- `POST /api/sandbox/start` always tears down the project's previous sandbox first
 - All sandbox storage is ephemeral — no data persists after cleanup
 
 ---
@@ -161,30 +172,21 @@ Both containers mount the same `emptyDir` volume at `/workspace`. Writes from th
 The AI layer uses LangGraph to run a stateful ReAct agent:
 
 ```js
-LangGraph.createAgent({
+createAgent({
   model: ChatMistralAI("mistral-large-latest"),
   tools: [list_files, read_files, update_files],
-  systemPrompt: "codeSpace — expert AI frontend engineer...",
+  systemPrompt: "FrontendForge — expert AI frontend engineer...",
   recursionLimit: 100
 })
 ```
 
-### Agent workflow
-
-1. **Understand** — parse user intent and implicit requirements
-2. **Plan** — outline component tree, styling, sections
-3. **Explore** — `list_files` → `read_files` on relevant files
-4. **Build** — `update_files` in batches (configs → shared components → pages)
-5. **Polish** — verify responsiveness, imports, accessibility
-6. **Report** — summarize changes via the SSE stream
-
 ### Streaming (SSE)
 
-`POST /api/ai/invoke` returns `text/event-stream`. Each line is either a tool activity string (e.g. `"Reading files...src/App.jsx"`) or the final AI response. The frontend's `AiChat` component renders these as an expandable activity log.
+`POST /api/ai/invoke` returns `text/event-stream`. Each line is either a tool activity string or the final AI response. The frontend renders these as an expandable activity log.
 
 ### Hot reload
 
-File writes land on the shared `emptyDir` volume. Vite's watcher (`usePolling: true`, `interval: 300ms`) detects changes and sends HMR updates to the preview iframe — no full reload needed.
+File writes land on the shared `emptyDir` volume. Vite's watcher detects changes and sends HMR updates to the preview iframe — no full reload needed.
 
 ---
 
@@ -193,90 +195,148 @@ File writes land on the shared `emptyDir` volume. Vite's watcher (`usePolling: t
 | Tool | Minimum | Purpose |
 |------|---------|---------|
 | Node.js | 20.x | All backend services + frontend |
-| npm | 10.x | Package management |
-| Docker | 24.x | Image builds |
+| Docker Desktop | 4.x | Container runtime + minikube driver |
 | kubectl | 1.28+ | Cluster management |
-| minikube / kind | latest | Local Kubernetes cluster |
-| skaffold | v2.x | Build + deploy orchestration |
-| nginx ingress | latest | Wildcard subdomain routing |
+| minikube | latest | Local Kubernetes cluster |
+
+> Skaffold is **not** required for local development. Images are built directly into minikube's Docker daemon.
 
 ---
 
 ## Local Setup
 
-### 1. Clone and start the cluster
+### 1. Start minikube
 
 ```bash
-git clone <repo-url>
-cd capstone
-
-minikube start --driver=docker --cpus=4 --memory=8g
+minikube start --driver=docker --memory=4096 --cpus=4
 minikube addons enable ingress
 ```
 
-### 2. Point Docker at minikube's daemon
+Wait for the ingress controller to be ready:
 
 ```bash
-eval $(minikube docker-env)
+kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=120s
 ```
 
-### 3. Configure secrets
+### 2. Apply secrets
 
 ```bash
+# Copy the example and fill in your credentials
 cp k8s/secrets.yml k8s/secrets.local.yml
-# Edit k8s/secrets.local.yml with your credentials
-# (MongoDB URI, Redis, RabbitMQ, Google OAuth, MistralAI key)
+# Edit k8s/secrets.local.yml with real values (MongoDB, Redis, RabbitMQ, Google OAuth, Mistral)
+
 kubectl apply -f k8s/secrets.local.yml
 ```
 
-> ⚠️ **Never commit `k8s/secrets.local.yml`** — add it to `.gitignore`.
+> **Never commit `k8s/secrets.local.yml`** — it is gitignored.
 
-### 4. Deploy
+### 3. Build all images into minikube
+
+Point your shell at minikube's Docker daemon, then build each image:
+
+```bash
+eval $(minikube docker-env)
+
+docker build -t sandbox    sandbox/server/
+docker build -t router     sandbox/router/
+docker build -t agent      sandbox/agent/
+docker build -t template   sandbox/template/
+docker build -t auth       auth/
+docker build -t ai-orchestration  ai-orchestration/
+```
+
+### 4. Apply Kubernetes manifests
 
 ```bash
 kubectl apply -f k8s/rbac.yml
-skaffold dev
-# Builds all 7 images, applies all manifests, streams logs
+kubectl apply -f k8s/sandbox-service.yml
+kubectl apply -f k8s/sandbox-deployment.yml
+kubectl apply -f k8s/auth-service.yml
+kubectl apply -f k8s/auth-deployment.yml
+kubectl apply -f k8s/router-service.yml
+kubectl apply -f k8s/router-deployment.yml
+kubectl apply -f k8s/ai-service.yml
+kubectl apply -f k8s/ai-deployment.yml
+kubectl apply -f k8s/ingress.yml
 ```
 
-### 5. Start the frontend
+Verify everything is running:
+
+```bash
+kubectl get pods
+# Expected: sandbox-deployment, auth-deployment, router-deployment, ai-deployment all 1/1 Running
+```
+
+### 5. Start the port-forward (keep this terminal open)
+
+Docker Desktop owns port 80 on macOS. This port-forward routes all traffic through port 18080 directly to the nginx ingress pod, bypassing Docker Desktop:
+
+```bash
+./start-local.sh
+```
+
+This script runs in a loop and automatically restarts if the ingress pod is replaced. Keep it running in a dedicated terminal for the duration of your session.
+
+To start it manually (without auto-restart):
+
+```bash
+kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 18080:80
+```
+
+### 6. Configure Google OAuth callback URL
+
+In [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials), open your OAuth 2.0 client and add this to **Authorized redirect URIs**:
+
+```
+http://localhost:18080/api/auth/google/callback
+```
+
+### 7. Start the frontend
 
 ```bash
 cd frontend
-npm install
+npm install        # first time only
 npm run dev
-# → http://localhost:5173
 ```
 
-### 6. Configure wildcard DNS (macOS)
+Open **http://localhost:5173** in your browser.
 
-Sandbox previews require `*.localhost` to resolve to the minikube IP:
+### 8. Sign in and create a sandbox
+
+1. Click **Continue with Google** on the splash screen
+2. Complete the Google OAuth flow — you'll be redirected back to `localhost:5173`
+3. Enter a project name and click **Create New Project**
+4. The sandbox pod will spin up (~30 seconds for the first run while images are pulled)
+
+---
+
+## Restarting after a reboot
+
+Minikube state persists across reboots but the port-forward does not. Each new session:
 
 ```bash
-brew install dnsmasq
-echo "address=/.localhost/$(minikube ip)" >> /opt/homebrew/etc/dnsmasq.conf
-sudo brew services start dnsmasq
+# 1. Make sure minikube is running
+minikube status || minikube start --driver=docker --memory=4096 --cpus=4
 
-sudo mkdir -p /etc/resolver
-echo "nameserver 127.0.0.1" | sudo tee /etc/resolver/localhost
+# 2. Start the port-forward
+./start-local.sh   # keep this terminal open
 
-ping testid.preview.localhost  # should resolve to minikube IP
+# 3. Start the frontend (separate terminal)
+cd frontend && npm run dev
 ```
 
-### Test a sandbox manually
+If you see pods in `Pending` state (usually means the cluster is out of memory from a previous session):
 
 ```bash
-# Create a sandbox
-curl -X POST http://localhost:80/api/sandbox/start
-# → { "sandboxId": "019e…", "previewUrl": "http://019e….preview.localhost" }
+# List stuck sandbox pods
+kubectl get pods | grep sandbox-pod
 
-# List files
-curl "http://019e….agent.localhost/list-files"
-
-# Update a file
-curl -X PATCH http://019e….agent.localhost/update-files \
-  -H "Content-Type: application/json" \
-  -d '{"updates":[{"file":"/src/App.jsx","content":"export default ()=><h1>Hello</h1>"}]}'
+# Delete them all at once
+kubectl delete pods -l sandboxId --ignore-not-found
+kubectl delete svc -l sandboxId --ignore-not-found
 ```
 
 ---
@@ -292,14 +352,13 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 | `GOOGLE_CLIENT_ID` | Google OAuth 2.0 client ID | ✅ |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 client secret | ✅ |
 | `JWT_SECRET` | HMAC secret for JWT signing (min 32 chars) | ✅ |
+| `GOOGLE_CALLBACK_URL` | OAuth callback URL — set to `http://localhost:18080/api/auth/google/callback` for local dev | ✅ |
 
 ### AI Orchestration Service
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `MISTRALAI_API_KEY` | MistralAI API key | ✅ |
-
-> ⚠️ Known issue: the K8s secret uses key `MISTRAL_API_KEY` but the code reads `MISTRALAI_API_KEY`. See [Known Issues](#known-issues).
+| `MISTRAL_API_KEY` | MistralAI API key | ✅ |
 
 ### Notification Service
 
@@ -316,12 +375,14 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `REDIS_URL` | Redis connection URL (`redis://` or `rediss://`) | ✅ |
+| `MONGO_URI` / `SANDBOX` | MongoDB connection string for sandbox DB | ✅ |
+| `JWT_SECRET` | Same secret as auth service — used to verify tokens | ✅ |
 
-### Sandbox Agent
+### Frontend
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `SHELL` | Shell binary for the PTY (defaults to `bash`) | Optional |
+| Variable | File | Description |
+|----------|------|-------------|
+| `VITE_SUBDOMAIN_PORT` | `frontend/.env.local` | Port appended to agent/preview subdomain URLs. Set to `18080` for local dev. Omit for production. |
 
 ---
 
@@ -332,25 +393,28 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/auth/google` | Initiates Google OAuth redirect |
-| `GET` | `/api/auth/google/callback` | OAuth callback; upserts user; sets JWT cookie |
+| `GET` | `/api/auth/google/callback` | OAuth callback; upserts user; sets JWT cookie; redirects to frontend |
+| `GET` | `/api/auth/me` | Returns `{ authenticated, userId }` — used by frontend to check login state |
 | `GET` | `/_status/healthz` | Liveness probe |
-| `GET` | `/_status/readyz` | Readiness probe |
 
 ### Sandbox Server
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/sandbox/start` | Creates pod + service + Redis TTL; returns `{ sandboxId, previewUrl }` |
-| `GET` | `/api/sandbox/health` | Health check |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/sandbox/project` | ✅ | Creates a new project record; body: `{ title }` |
+| `GET` | `/api/sandbox/project` | ✅ | Lists all projects for the authenticated user |
+| `POST` | `/api/sandbox/start` | ✅ | Tears down previous sandbox, creates new pod + service + Redis TTL; body: `{ projectId }` |
+| `POST` | `/api/sandbox/stop` | ✅ | Immediately deletes pod + service; body: `{ sandboxId }` |
+| `GET` | `/api/sandbox/health` | — | Health check |
 
 ### AI Orchestration Service
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/ai/invoke` | Body: `{ message, projectId }`. Streams agent activity + final response via SSE |
+| `POST` | `/api/ai/invoke` | Body: `{ message, projectId }`. Streams agent activity + final response via SSE (`text/event-stream`) |
 | `GET` | `/api/status/healthz` | Liveness probe |
 
-### Sandbox Agent (per-sandbox via `{id}.agent.localhost`)
+### Sandbox Agent (per-sandbox via `{id}.agent.lvh.me:18080`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -373,9 +437,10 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 ### What's in place
 - Pod-level sandbox isolation — each sandbox is its own Kubernetes pod
 - Unique `sandboxId` service selectors prevent cross-sandbox routing
-- `emptyDir` volumes are ephemeral and kernel-managed — cannot escape the pod
+- `emptyDir` volumes are ephemeral and kernel-managed
 - CPU and memory limits on all containers
-- RBAC for the sandbox server — only `pods` and `services` access in `default` namespace
+- RBAC for the sandbox server — only `pods` and `services` in `default` namespace
+- JWT cookie auth on all sandbox and project endpoints
 
 ### What needs hardening before public deployment
 
@@ -383,25 +448,19 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 |---------|--------------|----------------|
 | Secrets in repo | Plaintext in `k8s/secrets.yml` | Use Sealed Secrets, External Secrets Operator, or SOPS+age |
 | Sandbox `securityContext` | None — containers run as root | Add `runAsNonRoot`, `allowPrivilegeEscalation: false` |
-| JWT enforcement | Not enforced on sandbox/AI endpoints | Require valid JWT on `/api/sandbox/start` and `/api/ai/invoke` |
 | Service-to-service auth | Plain HTTP within cluster | Add mTLS via Istio or cert-manager |
 | Rate limiting | None | Add rate limiting on `/api/ai/invoke` and `/api/sandbox/start` |
-
-> ⚠️ **Critical:** `k8s/secrets.yml` contains live credentials committed to the repo. Rotate all credentials and remove this file from git history using `git filter-repo` or BFG Repo Cleaner before any public exposure.
 
 ---
 
 ## Known Issues
 
-| # | Issue | Impact |
+| # | Issue | Status |
 |---|-------|--------|
-| 1 | `k8s/secrets.yml` contains plaintext credentials in the repo | **Critical** |
-| 2 | `MISTRAL_API_KEY` (K8s secret) vs `MISTRALAI_API_KEY` (env var in code) mismatch | AI service won't get the key in cluster |
-| 3 | No JWT enforcement on `/api/sandbox/start` or `/api/ai/invoke` | Unauthenticated access |
-| 4 | No `securityContext` on sandbox pods | Containers run as root |
-| 5 | No rate limiting on AI or sandbox endpoints | Potential resource exhaustion |
-| 6 | All services use `nodemon` in production images | Not appropriate for prod |
-| 7 | Frontend labels AI as "Powered by Gemini" | Incorrect — model is `mistral-large-latest` |
+| 1 | `k8s/secrets.yml` contains plaintext credentials in the repo | **Open — rotate and purge from git history before any public exposure** |
+| 2 | All services use `nodemon` in production images | Open — switch to `node` for prod images |
+| 3 | No `securityContext` on sandbox pods | Open |
+| 4 | No rate limiting on AI or sandbox endpoints | Open |
 
 ---
 
@@ -410,7 +469,6 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 | Feature | Priority |
 |---------|----------|
 | Sandbox persistence (PVC / object storage) | High |
-| JWT auth enforcement on all endpoints | High |
 | Multi-language sandboxes (Python, Node, Go) | High |
 | Multi-turn AI conversation context | Medium |
 | Collaborative editing (Yjs CRDT) | Medium |
@@ -433,22 +491,6 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 | `docs/<desc>` | Documentation only |
 | `refactor/<desc>` | Code restructuring |
 
-### Pull request process
-
-1. Branch from `main`. Rebase before opening a PR.
-2. Title format: `<type>(<scope>): <subject>` — e.g. `fix(ai): correct MISTRAL_API_KEY env var name`
-3. PR description must include: what changed and why, related issue, how to test locally.
-4. All CI checks must pass and at least one reviewer must approve.
-
-### PR checklist
-
-- [ ] No secrets or credentials in code or manifests
-- [ ] No `console.log` left in production paths
-- [ ] New endpoints have at least a basic integration test
-- [ ] K8s manifests include resource requests/limits
-- [ ] Health probes updated if new service or port added
-- [ ] README updated if architecture changes
-
 ### Commit convention
 
 [Conventional Commits](https://www.conventionalcommits.org/):
@@ -457,8 +499,6 @@ curl -X PATCH http://019e….agent.localhost/update-files \
 <type>(<scope>): <subject>
 
 [optional body]
-
-[optional footer]
 ```
 
 Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`
@@ -468,7 +508,3 @@ Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `perf`
 ## License
 
 ISC License — Copyright (c) 2025 codeSpace contributors
-
-Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.

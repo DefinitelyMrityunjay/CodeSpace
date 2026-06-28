@@ -70,7 +70,8 @@ export default function Terminal({ sandboxId }) {
   const connectSocket = useCallback((term) => {
     if (!sandboxId || !term) return
 
-    const agentHost = `https://${sandboxId}.agent.cryboy.in`
+    const port = import.meta.env.VITE_SUBDOMAIN_PORT
+    const agentHost = `http://${sandboxId}.agent.lvh.me${port ? `:${port}` : ''}`
 
     try {
       const socket = io(agentHost, {

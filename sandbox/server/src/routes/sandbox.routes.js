@@ -1,15 +1,19 @@
 import { Router } from "express";
-import { createPod } from '../kubernetes/pod.js';
-import { createService } from '../kubernetes/service.js';
+import { createPod, deletePod } from '../kubernetes/pod.js';
+import { createService, deleteService } from '../kubernetes/service.js';
 import { createSandboxKey } from '../config/redis.js';
 import { v7 as uuid } from "uuid"
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import Project from "../models/project.model.js";
 
-
-
 const router = Router();
 
+async function teardown(sandboxId) {
+    await Promise.allSettled([
+        deletePod(sandboxId),
+        deleteService(sandboxId),
+    ]);
+}
 
 router.post('/project', authMiddleware, async (req, res) => {
     const { title } = req.body;
@@ -28,14 +32,16 @@ router.post('/project', authMiddleware, async (req, res) => {
 })
 
 router.post("/start", authMiddleware, async (req, res) => {
-
     const projectId = req.body.projectId;
 
-    // Verify that the project belongs to the authenticated user
     const project = await Project.findOne({ _id: projectId, user: req.user.id });
-
     if (!project) {
         return res.status(404).json({ message: 'Project not found or access denied' });
+    }
+
+    // Tear down previous sandbox for this project before creating a new one
+    if (project.currentSandboxId) {
+        await teardown(project.currentSandboxId);
     }
 
     const sandboxId = uuid();
@@ -46,11 +52,30 @@ router.post("/start", authMiddleware, async (req, res) => {
         createSandboxKey(sandboxId)
     ]);
 
+    project.currentSandboxId = sandboxId;
+    await project.save();
+
     return res.status(201).json({
         message: 'Sandbox environment created successfully',
         sandboxId,
-        previewUrl: `https://${sandboxId}.preview.cryboy.in`
+        previewUrl: `http://${sandboxId}.preview.lvh.me`
     })
+})
+
+// Explicit stop — called when the user closes the IDE or navigates away
+router.post("/stop", authMiddleware, async (req, res) => {
+    const { sandboxId } = req.body;
+    if (!sandboxId) return res.status(400).json({ message: 'sandboxId required' });
+
+    await teardown(sandboxId);
+
+    // Clear currentSandboxId on whichever project owns this sandbox
+    await Project.updateOne(
+        { currentSandboxId: sandboxId, user: req.user.id },
+        { $set: { currentSandboxId: null } }
+    );
+
+    return res.status(200).json({ message: 'Sandbox stopped' });
 })
 
 router.get("/project", authMiddleware, async (req, res) => {
@@ -61,6 +86,5 @@ router.get("/project", authMiddleware, async (req, res) => {
         projects
     })
 })
-
 
 export default router;

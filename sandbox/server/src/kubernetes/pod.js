@@ -20,7 +20,7 @@ export async function createPod(sandboxId, projectId) {
             initContainers: [
                 {
                     name: 'init-container',
-                    image: "329599656829.dkr.ecr.ap-southeast-1.amazonaws.com/template",
+                    image: "template",
                     imagePullPolicy: "IfNotPresent",
                     command: [ 'sh', '-c', 'cp -r /workspace/. /seed/' ],
                     volumeMounts: [
@@ -33,7 +33,7 @@ export async function createPod(sandboxId, projectId) {
             ],
             containers: [
                 {
-                    image: "329599656829.dkr.ecr.ap-southeast-1.amazonaws.com/template",
+                    image: "template",
                     imagePullPolicy: "IfNotPresent",
                     name: 'sandbox-container',
                     ports: [ { containerPort: 5173, name: "http" } ],
@@ -49,7 +49,7 @@ export async function createPod(sandboxId, projectId) {
                     ]
                 },
                 {
-                    image: "329599656829.dkr.ecr.ap-southeast-1.amazonaws.com/agent",
+                    image: "agent",
                     imagePullPolicy: "IfNotPresent",
                     name: 'agent-container',
                     ports: [ { containerPort: 3000, name: "http" } ],
@@ -61,56 +61,6 @@ export async function createPod(sandboxId, projectId) {
                         {
                             name: 'workspace-volume',
                             mountPath: '/workspace'
-                        }
-                    ]
-                },
-                {
-                    image: "329599656829.dkr.ecr.ap-southeast-1.amazonaws.com/sync-agent",
-                    imagePullPolicy: "IfNotPresent",
-                    name: 'sync-agent-container',
-                    ports: [ { containerPort: 4000, name: "http" } ],
-                    resources: {
-                        limits: { cpu: "500m", memory: "1Gi" },
-                        requests: { cpu: "250m", memory: "500Mi" }
-                    },
-                    volumeMounts: [
-                        {
-                            name: 'workspace-volume',
-                            mountPath: '/workspace'
-                        }
-                    ],
-                    env: [
-                        {
-                            name: "PROJECT_ID",
-                            value: projectId
-                        },
-                        {
-                            name: "AWS_ACCESS_KEY_ID",
-                            valueFrom: {
-                                secretKeyRef: {
-                                    name: "aws",
-                                    key: "AWS_ACCESS_KEY_ID"
-                                }
-                            }
-                        },
-                        {
-                            name: "AWS_SECRET_ACCESS_KEY",
-                            valueFrom: {
-                                secretKeyRef: {
-                                    name: "aws",
-                                    key: "AWS_SECRET_ACCESS_KEY"
-                                }
-                            }
-
-                        },
-                        {
-                            name: "AWS_REGION",
-                            valueFrom: {
-                                secretKeyRef: {
-                                    name: "aws",
-                                    key: "AWS_REGION"
-                                }
-                            }
                         }
                     ]
                 }

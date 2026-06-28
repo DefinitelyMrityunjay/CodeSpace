@@ -20,72 +20,102 @@ const proxies = {}
 const agentProxies = {}
 
 function getProxy(sandboxId) {
-    const target = `http://sandbox-service-${sandboxId}`;
     if (!proxies[ sandboxId ]) {
         proxies[ sandboxId ] = createProxyMiddleware({
-            target,
+            target: `http://sandbox-service-${sandboxId}`,
             changeOrigin: true,
+            on: {
+                error: (err, req, res) => {
+                    console.error(`[preview-proxy][${sandboxId}] ${err.message}`);
+                    if (!res.headersSent) {
+                        res.status(502).json({ error: 'Preview sandbox unreachable', sandboxId });
+                    }
+                }
+            }
         });
     }
     return proxies[ sandboxId ];
 }
 
 function getAgentProxy(sandboxId) {
-    const target = `http://sandbox-service-${sandboxId}:3000`;
     if (!agentProxies[ sandboxId ]) {
         agentProxies[ sandboxId ] = createProxyMiddleware({
-            target,
+            target: `http://sandbox-service-${sandboxId}:3000`,
             changeOrigin: true,
+            on: {
+                error: (err, req, res) => {
+                    console.error(`[agent-proxy][${sandboxId}] ${err.message}`);
+                    if (!res.headersSent) {
+                        res.status(502).json({ error: 'Sandbox agent unreachable', sandboxId });
+                    }
+                }
+            }
         });
     }
     return agentProxies[ sandboxId ];
 }
 
-// Single httpxy proxy server for all WebSocket upgrades
+// Single httpxy proxy server handles all WebSocket upgrades
 const wsProxy = createProxyServer({ changeOrigin: true });
 wsProxy.on('error', (err, req, socket) => {
-    console.error('WS proxy error:', err.message);
+    console.error(`[ws-proxy] ${err.message}`);
     socket?.destroy();
 });
 
 app.use(async (req, res, next) => {
     const host = req.headers.host;
-    const sandboxId = host.split('.')[ 0 ];
+    if (!host) return next();
 
-    await refreshTTL(sandboxId);
+    const parts = host.split('.');
+    const sandboxId = parts[0];
+    const type = parts[1];
 
-    if (host.split('.')[ 1 ] === 'agent') {
+    // Refresh TTL in Redis; don't let a Redis hiccup take down the proxy
+    try {
+        await refreshTTL(sandboxId);
+    } catch (err) {
+        console.error(`[router] refreshTTL failed for ${sandboxId}: ${err.message}`);
+    }
+
+    if (type === 'agent') {
         return getAgentProxy(sandboxId)(req, res, next);
-    } else if (host.split('.')[ 1 ] === 'preview') {
+    }
+    if (type === 'preview') {
         return getProxy(sandboxId)(req, res, next);
     }
+
+    next();
 });
 
-// Create the HTTP server explicitly
 const server = http.createServer(app);
 
 server.on('upgrade', (req, socket, head) => {
     const host = req.headers.host;
     if (!host) { socket.destroy(); return; }
 
-    // Prevent EPIPE and connection-reset errors from crashing the process
-    // during the active piped session (after ws() Promise has resolved)
     socket.on('error', () => socket.destroy());
 
-    const sandboxId = host.split('.')[ 0 ];
-    const type = host.split('.')[ 1 ];
+    const parts = host.split('.');
+    const sandboxId = parts[0];
+    const type = parts[1];
 
-    console.log(`WS upgrade request: ${host}, sandboxId: ${sandboxId}, type: ${type}`);
+    console.log(`[ws-upgrade] host=${host} sandboxId=${sandboxId} type=${type}`);
 
     if (type === 'agent') {
         wsProxy.ws(req, socket, { target: `http://sandbox-service-${sandboxId}:3000` }, head)
-            .catch(() => socket.destroy());
+            .catch((err) => {
+                console.error(`[ws-upgrade][agent][${sandboxId}] ${err.message}`);
+                socket.destroy();
+            });
     } else if (type === 'preview') {
         wsProxy.ws(req, socket, { target: `http://sandbox-service-${sandboxId}` }, head)
-            .catch(() => socket.destroy());
+            .catch((err) => {
+                console.error(`[ws-upgrade][preview][${sandboxId}] ${err.message}`);
+                socket.destroy();
+            });
     } else {
         socket.destroy();
     }
 });
 
-export default server; // export server, not app
+export default server;

@@ -24,8 +24,11 @@ export default function App() {
   const dragStartH = useRef(0)
 
   const handleSandboxCreated = useCallback((data) => {
-    const agentBase = `https://${data.sandboxId}.agent.cryboy.in`
-    setSandbox({ sandboxId: data.sandboxId, previewUrl: data.previewUrl, agentBase })
+    const port = import.meta.env.VITE_SUBDOMAIN_PORT
+    const p = port ? `:${port}` : ''
+    const agentBase = `http://${data.sandboxId}.agent.lvh.me${p}`
+    const previewUrl = `http://${data.sandboxId}.preview.lvh.me${p}`
+    setSandbox({ sandboxId: data.sandboxId, previewUrl, agentBase })
     setStatus('ready')
   }, [])
 

@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // REST API — forwarded to the backend/ingress
       "/api": {
-        target: "http://127.0.0.1:80",
+        target: "http://127.0.0.1:18080",
         changeOrigin: true,
         secure: false,
         configure: (proxy) => {
